@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Search</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- For graphs -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        select, input {
+            padding: 10px;
+            margin: 10px 0;
+            width: 100%;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .stats {
+            margin-top: 20px;
+        }
+        .stats p {
+            font-size: 1.1em;
+        }
+        #statsGraph {
+            margin-top: 30px;
+        }
+        #subjectComparisonGraph {
+            margin-bottom: 30px;
+        }
+        .suggestions {
+            border: 1px solid #ddd;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: -10px;
+        }
+        .suggestions div {
+            padding: 10px;
+            cursor: pointer;
+            background-color: #fff;
+        }
+        .suggestions div:hover {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Student Marks Search</h1>
+    
+    <!-- Graph comparing pass percentages between subjects -->
+    <canvas id="subjectComparisonGraph" width="400" height="200"></canvas>
+    
+    <!-- Dropdown for selecting subject -->
+    <label for="subject">Select a Subject:</label>
+    <select id="subject">
+        <option value="">-- Select Subject --</option>
+        <!-- Options will be populated dynamically -->
+    </select>
+
+    <!-- Search bar for roll number -->
+    <label for="rollNumber">Search by Roll Number:</label>
+    <input type="text" id="rollNumber" placeholder="Enter Roll Number">
+
+    <!-- Search bar for name with suggestions -->
+    <label for="studentName">Search by Name:</label>
+    <input type="text" id="studentName" placeholder="Enter Student Name">
+    <div id="nameSuggestions" class="suggestions"></div>
+
+    <!-- Statistics section -->
+    <div class="stats" id="stats"></div>
+
+    <!-- Graph section -->
+    <canvas id="statsGraph" width="400" height="200"></canvas>
+
+    <!-- Results section -->
+    <div id="results"></div>
+
+</div>
+
+<script>
+// Fetch the JSON file and process the data
+fetch('students.json')
+    .then(response => response.json())
+    .then(data => {
+        const students = data;
+
+        // Function to populate the dropdown with unique subjects
+        function populateSubjectDropdown() {
+            const subjectSelect = document.getElementById('subject');
+            const uniqueSubjects = [...new Set(students.map(student => student.HONS))]; // Get unique subjects
+
+            uniqueSubjects.forEach(subject => {
+                const option = document.createElement('option');
+                option.value = subject;
+                option.textContent = subject;
+                subjectSelect.appendChild(option);
+            });
+        }
+
+        // Function to calculate pass percentages for all subjects
+        function calculatePassPercentageForAllSubjects() {
+            const subjects = [...new Set(students.map(student => student.HONS))]; // Unique subjects
+            const passPercentages = subjects.map(subject => {
+                const subjectStudents = students.filter(student => student.HONS === subject);
+                const passedStudents = subjectStudents.filter(student => student.RESULT2 === 'Pass').length;
+                const passPercentage = (passedStudents / subjectStudents.length) * 100;
+                return { subject, passPercentage };
+            });
+            return passPercentages;
+        }
+
+        // Display the pass percentage comparison graph for all subjects
+        function displayPassComparisonGraph(passPercentages) {
+            const ctx = document.getElementById('subjectComparisonGraph').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: passPercentages.map(p => p.subject),
+                    datasets: [{
+                        label: 'Pass Percentage (%)',
+                        data: passPercentages.map(p => p.passPercentage),
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) { return value + "%" }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Event listener for subject selection
+        document.getElementById('subject').addEventListener('change', function() {
+            const selectedSubject = this.value;
+            if (selectedSubject) {
+                calculateStatistics(selectedSubject);
+                displayStudentsBySubject(selectedSubject);
+            }
+        });
+
+        // Event listener for roll number search
+        document.getElementById('rollNumber').addEventListener('input', function() {
+            const rollNumber = this.value;
+            if (rollNumber) {
+                searchByRollNumber(rollNumber);
+            } else {
+                document.getElementById('results').innerHTML = '';
+            }
+        });
+
+        // Event listener for name search
+        document.getElementById('studentName').addEventListener('input', function() {
+            const nameQuery = this.value.toLowerCase();
+            if (nameQuery) {
+                suggestNames(nameQuery);
+            } else {
+                document.getElementById('nameSuggestions').innerHTML = '';
+                document.getElementById('results').innerHTML = '';
+            }
+        });
+
+        // Function to display students by selected subject
+        function displayStudentsBySubject(subject) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = ''; // Clear previous results
+
+            const filteredStudents = students.filter(student => student.HONS === subject);
+
+            let table = '<table><tr><th>Roll Number</th><th>Name</th><th>Centre</th><th>SGPA</th><th>Result</th></tr>';
+            filteredStudents.forEach(student => {
+                table += `<tr>
+                    <td>${student.RN1}</td>
+                    <td>${student.FUNAME}</td>
+                    <td>${student.CENTRE}</td>
+                    <td>${student.SGPA2S}</td>
+                    <td>${student.RESULT2}</td>
+                </tr>`;
+            });
+            table += '</table>';
+
+            resultsDiv.innerHTML = table;
+        }
+
+        // Function to search by roll number
+        function searchByRollNumber(rollNumber) {
+            const resultsDiv = document.getElementById('results');
+            const student = students.find(student => student.RN1 === rollNumber);
+
+            if (student) {
+                resultsDiv.innerHTML = `
+                    <p><strong>Roll Number:</strong> ${student.RN1}</p>
+                    <p><strong>Name:</strong> ${student.FUNAME}</p>
+                    <p><strong>Centre:</strong> ${student.CENTRE}</p>
+                    <p><strong>SGPA:</strong> ${student.SGPA2S}</p>
+                    <p><strong>Result:</strong> ${student.RESULT2}</p>
+                `;
+            } else {
+                resultsDiv.innerHTML = '<p>No student found with this roll number.</p>';
+            }
+        }
+
+        // Function to suggest names based on input
+        function suggestNames(query) {
+            const suggestionsDiv = document.getElementById('nameSuggestions');
+            suggestionsDiv.innerHTML = ''; // Clear previous suggestions
+
+            const matchingNames = students.filter(student => student.FUNAME.toLowerCase().includes(query));
+
+            matchingNames.forEach(student => {
+                const suggestion = document.createElement('div');
+                suggestion.textContent = student.FUNAME;
+                suggestion.addEventListener('click', () => {
+                    document.getElementById('studentName').value = student.FUNAME;
+                    searchByName(student.FUNAME);
+                    suggestionsDiv.innerHTML = ''; // Clear suggestions after selection
+                });
+                suggestionsDiv.appendChild(suggestion);
+            });
+        }
+
+        // Function to search by student name
+        function searchByName(name) {
+            const resultsDiv = document.getElementById('results');
+            const student = students.find(student => student.FUNAME.toLowerCase() === name.toLowerCase());
+
+            if (student) {
+                resultsDiv.innerHTML = `
+                    <p><strong>Roll Number:</strong> ${student.RN1}</p>
+                    <p><strong>Name:</strong> ${student.FUNAME}</p>
+                    <p><strong>Centre:</strong> ${student.CENTRE}</p>
+                    <p><strong>SGPA:</strong> ${student.SGPA2S}</p>
+                    <p><strong>Result:</strong> ${student.RESULT2}</p>
+                `;
+            } else {
+                resultsDiv.innerHTML = '<p>No student found with this name.</p>';
+            }
+        }
+
+        // Function to calculate and display statistics, including pass percentage and highest SGPA student
+        function calculateStatistics(subject) {
+            const filteredStudents = students.filter(student => student.HONS === subject);
+            const validSGPAs = filteredStudents
+                .map(student => parseFloat(student.SGPA2S)) // Convert SGPA to number
+                .filter(sgpa => !isNaN(sgpa)); // Ignore invalid or empty SGPA
+
+            const totalStudents = filteredStudents.length;
+            const passedStudents = filteredStudents.filter(student => student.RESULT2 === 'Pass').length;
+            const failedStudents = totalStudents - passedStudents;
+            const passPercentage = ((passedStudents / totalStudents) * 100).toFixed(2);
+            const highestSGPA = Math.max(...validSGPAs);
+            const lowestSGPA = Math.min(...validSGPAs);
+            const meanSGPA = (validSGPAs.reduce((acc, val) => acc + val, 0) / validSGPAs.length).toFixed(2);
+
+            // Find the student with the highest SGPA
+            const highestSGPAStudent = filteredStudents.find(student => parseFloat(student.SGPA2S) === highestSGPA);
+
+            // Display stats above the results
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = `
+                <p><strong>Total Students:</strong> ${totalStudents}</p>
+                <p><strong>Passed Students:</strong> ${passedStudents}</p>
+                <p><strong>Failed Students:</strong> ${failedStudents}</p>
+                <p><strong>Pass Percentage:</strong> ${passPercentage}%</p>
+                <p><strong>Highest SGPA:</strong> ${highestSGPA} (${highestSGPAStudent?.FUNAME || 'N/A'})</p>
+                <p><strong>Lowest SGPA:</strong> ${lowestSGPA}</p>
+                <p><strong>Average SGPA:</strong> ${meanSGPA}</p>
+            `;
+
+            // Generate the graph
+            generateSGPAGraph(filteredStudents);
+        }
+
+        // Function to generate SGPA graph using student names on the x-axis
+        function generateSGPAGraph(filteredStudents) {
+            const ctx = document.getElementById('statsGraph').getContext('2d');
+            const names = filteredStudents.map(student => student.FUNAME);
+            const sGPAs = filteredStudents.map(student => parseFloat(student.SGPA2S));
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: names, // Display student names
+                    datasets: [{
+                        label: 'SGPA',
+                        data: sGPAs,
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initial load: Populate dropdown and display subject comparison graph
+        populateSubjectDropdown();
+        const passPercentages = calculatePassPercentageForAllSubjects();
+        displayPassComparisonGraph(passPercentages);
+    })
+    .catch(error => console.error('Error fetching JSON:', error));
+</script>
+
+</body>
+</html>
